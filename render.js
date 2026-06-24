@@ -8,11 +8,10 @@ const SHUFFLE_QUIPS = [
 ];
 
 let STATE = {
-  screen: 'home',     // 'home' | 'room'
+  screen: 'home',
   roomCode: null,
   room: null,
   selectedDiscardIdx: null,
-  selectedPassIdx: [],
   showHowTo: false,
   busy: false,
   lastPhaseSeen: null,
@@ -29,11 +28,10 @@ function tileNode(tile, opts){
   if(opts.back) cls.push('back');
   if(opts.clickable) cls.push('clickable');
   if(opts.selected) cls.push('selected');
-  if(opts.passsel) cls.push('passsel');
   if(!opts.back){
-    if(isJoker(tile)) cls.push('joker');
-    else if(WINDS.includes(tile)||DRAGONS.includes(tile)) {
-      cls.push('honor');
+    if(opts.wild) cls.push('joker');
+    else if(isFlowerCategory(tile)){
+      cls.push('flowercat');
       if(DRAGONS.includes(tile)) cls.push('dragon-'+tile);
     }
     else cls.push('suit-'+suitOf(tile));
@@ -43,14 +41,18 @@ function tileNode(tile, opts){
   if(opts.action) dataAttrs += ` data-action="${opts.action}"${opts.extra||''}`;
   return `<div class="${cls.join(' ')}" title="${opts.back?'':tileLabel(tile)}"${dataAttrs}>${glyph}</div>`;
 }
-function meldNode(meld){
-  return `<div class="meld-tiles">${meld.tiles.map(t=>tileNode(t,{})).join('')}</div>`;
+function meldNode(meld, jokerTile){
+  return `<div class="meld-tiles">${meld.tiles.map(t=>tileNode(t,{wild:t===jokerTile})).join('')}</div>`;
 }
 function backTilesRow(n){
   let s='<div class="tilecount">';
-  for(let i=0;i<Math.min(n,14);i++) s += '<div class="backtile"></div>';
+  for(let i=0;i<Math.min(n,17);i++) s += '<div class="backtile"></div>';
   s += '</div>';
   return s;
+}
+function flowerRow(flowerTiles){
+  if(!flowerTiles || !flowerTiles.length) return '';
+  return `<div class="flower-row">${flowerTiles.map(f=>`<span class="flower-chip" title="${tileLabel(f)}">${GLYPH[f]}</span>`).join('')}</div>`;
 }
 
 function escapeHtml(s){
@@ -105,7 +107,7 @@ function renderApp(){
   if(STATE.room){
     const prevPhase = STATE.lastPhaseSeen;
     const curPhase = STATE.room.phase;
-    if(curPhase==='pass' && (prevPhase==='lobby' || prevPhase==='handEnd')){
+    if(curPhase==='play' && (prevPhase==='lobby' || prevPhase==='handEnd')){
       STATE.shuffleQuip = SHUFFLE_QUIPS[Math.floor(Math.random()*SHUFFLE_QUIPS.length)];
       STATE.shuffleUntil = Date.now() + 1700;
       setTimeout(renderApp, 1750);
@@ -132,14 +134,13 @@ function renderApp(){
 function renderLanterns(){
   return `<div class="lanterns">${Array.from({length:7}).map(()=>'<div class="lantern"></div>').join('')}</div>`;
 }
-
 function renderHome(){
   return `
   ${renderLanterns()}
   <div class="screen">
     <div class="center" style="margin-bottom:8px;">
       <h1 class="brand">🀄 Snows Mahjong Corner</h1>
-      <p class="subtitle">Filipino-style mahjong, played online with your barkada.</p>
+      <p class="subtitle">Authentic 16-tile Filipino mahjong, played online with your barkada.</p>
     </div>
     <div class="card">
       <label for="nameInput">Your name</label>
@@ -207,8 +208,6 @@ function renderLobby(room){
     </div>
   </div>`;
 }
-function relativeLabel(offset){ return ['','Next','Across','Before you'][offset]; }
-
 function renderOpponentsRow(room, mySeat){
   const order = mySeat<0 ? [0,1,2,3] : [ (mySeat+1)%4, (mySeat+2)%4, (mySeat+3)%4 ];
   return `<div class="opponents-row">` + order.map(seat=>{
@@ -217,50 +216,32 @@ function renderOpponentsRow(room, mySeat){
     const isTurn = room.phase==='play' && room.turnSeat===seat;
     const initials = (s.name||'?').slice(0,2).toUpperCase();
     const handCount = room.hands[seat] ? room.hands[seat].length : 0;
-    const melds = (room.melds[seat]||[]).map(m=>`<div class="meld-tiles">${m.tiles.map(t=>tileNode(t,{})).join('')}</div>`).join('');
+    const melds = (room.melds[seat]||[]).map(m=>meldNode(m, room.jokerTile)).join('');
     return `<div class="opp ${isTurn?'turn':''}">
       <div class="avatar">${initials}</div>
       <div class="nm">${escapeHtml(s.name)}${room.dealerSeat===seat?' 🀄':''}${s.isBot?' 🤖':''}</div>
       <div class="opp-balance ${moneyClass(room.chips[seat])}">${fmtMoney(room.chips[seat])}</div>
       ${backTilesRow(handCount)}
       <div class="meld-strip">${melds}</div>
+      ${flowerRow(room.flowers[seat])}
     </div>`;
   }).join('') + `</div>`;
 }
 
 function renderFelt(room){
-  const wallLeft = Math.max(0, room.deck.length - DEAD_WALL_SIZE - room.deckPos);
+  const wallLeft = Math.max(0, room.backPos - room.deckPos + 1);
   const discards = room.discardPile.slice(-16);
   const lastIdx = discards.length-1;
   const discardHtml = discards.map((d,i)=>{
     const ring = i===lastIdx ? 'last-discard-ring' : '';
-    return `<span class="${ring}">${tileNode(d.tile,{})}</span>`;
+    return `<span class="${ring}">${tileNode(d.tile,{wild:d.tile===room.jokerTile})}</span>`;
   }).join('');
   return `<div class="felt">
     <div class="wall-info">🀫 Wall: ${wallLeft}</div>
     <div class="dealer-info">🀄 ${seatName(room,room.dealerSeat)}</div>
     ${discards.length? `<div class="discard-grid">${discardHtml}</div>` : `<p class="muted center">The table is set. First discard coming up…</p>`}
-  </div>`;
-}
-
-function renderPassDock(room, mySeat){
-  const submittedSeats = room.passPhase ? Object.keys(room.passPhase.submitted).map(Number) : [];
-  const waitingFor = [0,1,2,3].filter(s=>!submittedSeats.includes(s)).map(s=>seatName(room,s));
-  const already = mySeat>=0 && room.passPhase && room.passPhase.submitted[mySeat];
-  const hand = sortHand(room.hands[mySeat]||[]);
-  const handHtml2 = hand.map((t,idx)=>{
-    const sel = STATE.selectedPassIdx && STATE.selectedPassIdx.includes(idx);
-    return `<div class="tile ${already?'':'clickable'} ${sel?'passsel':''} ${isJoker(t)?'joker':(isHonor(t)?('honor '+(DRAGONS.includes(t)?'dragon-'+t:'')):('suit-'+suitOf(t)))}"
-      data-tile="${t}" ${already?'':`data-action="togglePassIdx" data-idx="${idx}"`} title="${tileLabel(t)}">${GLYPH[t]}</div>`;
-  }).join('');
-  return `
-  <div class="hand-dock">
-    <div class="turn-banner">🎁 Goulash pass: choose 3 tiles to pass to ${seatName(room,(mySeat+1)%4)}</div>
-    <div class="hand-row">${handHtml2}</div>
-    <div class="action-bar">
-      ${already
-        ? `<p class="muted">Waiting on: ${waitingFor.join(', ')||'everyone'}…</p>`
-        : `<button class="btn" data-action="confirmPass" ${STATE.selectedPassIdx&&STATE.selectedPassIdx.length===3?'':'disabled'}>Pass these 3 tiles</button>`}
+    <div class="joker-badge" style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);">
+      ${GLYPH[room.jokerTile]} Wild this hand: ${tileLabel(room.jokerTile)}
     </div>
   </div>`;
 }
@@ -275,11 +256,12 @@ function renderPlayDock(room, mySeat){
   const pd = room.pendingDiscard;
   const iCanClaim = pd && pd.eligible[mySeat] && pd.responses[mySeat]===undefined;
 
-  const meldsHtml = melds.map(m=>meldNode(m)).join('');
+  const meldsHtml = melds.map(m=>meldNode(m, room.jokerTile)).join('');
   const handHtml = hand.map((t,idx)=>{
     const sel = STATE.selectedDiscardIdx === idx;
     const clickable = myTurn && room.turnPhase==='discard';
-    return `<div class="tile ${clickable?'clickable':''} ${sel?'selected':''} ${isJoker(t)?'joker':(isHonor(t)?('honor '+(DRAGONS.includes(t)?'dragon-'+t:'')):('suit-'+suitOf(t)))}"
+    const wild = t===room.jokerTile;
+    return `<div class="tile ${clickable?'clickable':''} ${sel?'selected':''} ${wild?'joker':(isFlowerCategory(t)?('flowercat '+(DRAGONS.includes(t)?'dragon-'+t:'')):('suit-'+suitOf(t)))}"
       data-tile="${t}" ${clickable?`data-action="selectDiscard" data-idx="${idx}"`:''} title="${tileLabel(t)}">${GLYPH[t]}</div>`;
   }).join('');
 
@@ -289,13 +271,11 @@ function renderPlayDock(room, mySeat){
     banner = `Your turn — draw a tile.`;
     actionBar = `<button class="btn" data-action="drawTile">🀫 Draw tile</button>`;
   } else if(myTurn && room.turnPhase==='discard'){
-    const canWin = isWinningShape(room.hands[mySeat], melds.length).ok;
-    const popEye = jokerCountIn(room.hands[mySeat])>=4;
+    const canWin = isWinningShape(room.hands[mySeat], melds.length, room.jokerTile).ok;
     const kongs = myAvailableConcealedKongs(room, mySeat);
     banner = canWin ? `You can declare Mahjong! 🎉` : `Your turn — pick a tile to discard.`;
     actionBar = `
       ${canWin?`<button class="btn jade" data-action="declareWin">🀄 Declare Mahjong</button>`:''}
-      ${popEye?`<button class="btn jade" data-action="declarePopEye">🃏 Pop-Eye!</button>`:''}
       ${kongs.map(t=>`<button class="btn secondary" data-action="declareKong" data-tile="${t}">Kong ${tileLabel(t)}</button>`).join('')}
       <button class="btn ember" data-action="confirmDiscard" ${STATE.selectedDiscardIdx==null?'disabled':''}>Discard</button>`;
   } else if(room.turnPhase==='claim' && pd){
@@ -319,6 +299,7 @@ function renderPlayDock(room, mySeat){
   <div class="hand-dock">
     <div class="turn-banner">${banner}</div>
     ${meldsHtml?`<div class="my-melds">${meldsHtml}</div>`:''}
+    ${room.flowers[mySeat] && room.flowers[mySeat].length ? `<div class="my-flowers">${room.flowers[mySeat].map(f=>tileNode(f,{})).join('')}</div>` : ''}
     <div class="hand-row">${handHtml}</div>
     <div class="action-bar">${actionBar}</div>
   </div>`;
@@ -336,12 +317,9 @@ function renderHandEndModal(room){
   let body = '';
   if(r.draw){
     body = `<p class="muted">The wall ran dry — nobody completed a hand. The deal stays with ${seatName(room,room.dealerSeat)}.</p>`;
-  } else if(r.popEye){
-    body = `<p>${seatName(room,r.winnerSeat)} collected all four Jokers for an instant <b>Pop-Eye</b> win! 🃏</p>
-      <p class="muted">🟡🟡 2 big chips ($2.00) from each opponent.</p>`;
   } else {
-    const handHtml = sortHand(r.hand).map(t=>tileNode(t,{})).join('');
-    const meldsHtml = (r.melds||[]).map(m=>meldNode(m)).join('');
+    const handHtml = sortHand(r.hand).map(t=>tileNode(t,{wild:t===room.jokerTile})).join('');
+    const meldsHtml = (r.melds||[]).map(m=>meldNode(m, room.jokerTile)).join('');
     const chipIcons = '🟡'.repeat(Math.min(r.score.bigChips,8));
     body = `
       <p><b>${seatName(room,r.winnerSeat)}</b> wins ${r.wonBy==='self'?'by self-draw 🌟':'off '+seatName(room,r.discarderSeat)+"'s discard"}!</p>
@@ -382,26 +360,26 @@ function renderHowTo(){
     <button class="close-x" data-action="toggleHowTo">×</button>
     <h2>🀄 How Snows Mahjong Corner works</h2>
     <div class="howto-body">
-      <p>A cozy, simplified take on Filipino mahjong for four players (fill empty seats with bots if your barkada is short tonight).</p>
-      <h3>Goal</h3>
-      <p>Collect four sets (three-of-a-kind "pungs", four-of-a-kind "kongs", or three-in-a-row "chows") plus one pair, then declare Mahjong. Seven unique pairs is also a valid win.</p>
-      <h3>The pass</h3>
-      <p>At the start of every hand, everyone secretly picks 3 tiles to pass to the player on their right — a Filipino "goulash" touch. Choose tiles you don't need.</p>
+      <p>Authentic 16-tile Filipino mahjong for four players (fill empty seats with bots if your barkada is short tonight).</p>
+      <h3>The deal</h3>
+      <p>Everyone gets 16 tiles. The dealer draws a 17th and discards first. Play moves to the right (counter-clockwise).</p>
+      <h3>Flowers</h3>
+      <p>Winds, dragons, and the traditional flower/season tiles are all "flowers" here — bonus tiles, never used in melds. Draw one and it's immediately set aside in your flower corner, then you draw a replacement from the back of the wall. Collect 13 flowers in one hand and you get a small chip from each opponent on the spot. Win a hand with zero flowers drawn and you get a bonus too.</p>
+      <h3>The Joker</h3>
+      <p>At the start of each hand, one tile type is revealed as that hand's Joker (shown on the table) — every copy of it is wild, standing in for any tile in a pung, kong, or chow, but never the pair.</p>
       <h3>Your turn</h3>
-      <p>Draw a tile, then discard one. If a discard completes your hand, or completes a pung/kong (anyone) or a chow (only from the player right before you), tap the matching button when it appears. Mahjong claims always win out over pung/kong, which win out over chow.</p>
-      <h3>Jokers</h3>
-      <p>Jokers stand in for any tile in a pung, kong, or chow — but never in the pair. Collect all four and you win instantly with a "Pop-Eye!"</p>
+      <p>Draw a tile (flowers auto-resolve), then discard one. Mahjong claims always beat pung/kong, which beat chow. Pung and kong can be claimed off anyone's discard; chow only off the discard of the player to your right.</p>
+      <h3>Winning</h3>
+      <p>A full hand is 5 sets (pung, kong, or chow) plus one pair — 17 tiles. Seven pairs plus one triple is also a valid win.</p>
       <h3>Chips — the in-game money</h3>
-      <p>This table plays for chips: small silver chips are worth 50¢, big gold chips are worth $1. Declaring a Kong — a secret/concealed kong, a "sagasa" (drawing the 4th tile of your own pung), or a kang claimed off a discard — pays you one small chip from each opponent. Winning a hand pays big chips: a normal win is 1 big chip from each opponent, with bonus doubles stacking for Seven Pairs, an all-pungs hand, a one-suit flush, and any kongs in your hand. Self-drawn wins are paid double by everyone; discard wins are paid double by whoever discarded the tile, normal by the rest. Watch for the chip notifications flying across the table — your running balance is shown under your name.</p>
-      <p class="muted" style="margin-top:14px;">House note: this is a simplified, friend-table ruleset rather than a tournament-official one, and the game state is stored unencrypted so it can be shared online without a real server — please only share your room code with people you trust at the table.</p>
+      <p>Small silver chips are worth 50¢, big gold chips are worth $1. A Kong of any kind — secret, sagasa (drawing your own 4th tile), or claimed off a discard — pays one small chip from each opponent, immediately. Winning a hand pays big chips: a normal win is 1 big chip from each opponent, with bonus doubles stacking for Seven Pairs + Triple, an all-pungs hand, a one-suit flush, kongs in hand, and a flowerless hand. Self-drawn wins are paid double by everyone; discard wins are paid double by whoever discarded the tile, normal by the rest.</p>
+      <p class="muted" style="margin-top:14px;">House note: this is a friend-table ruleset, and the game state isn't encrypted — please only share your room code with people you trust at the table.</p>
     </div>
   </div></div>`;
 }
 function renderGame(room){
   const mySeat = mySeatIndex(room);
-  let dock = '';
-  if(room.phase==='pass') dock = renderPassDock(room, mySeat);
-  else dock = renderPlayDock(room, mySeat);
+  const dock = renderPlayDock(room, mySeat);
 
   let overlay = '';
   if(room.phase==='handEnd') overlay = renderHandEndModal(room);

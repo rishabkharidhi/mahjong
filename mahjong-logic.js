@@ -1,16 +1,16 @@
 /* =====================================================================
-   SNOWS MAHJONG CORNER — Filipino-style mahjong, playable online with friends.
+   SNOWS MAHJONG CORNER — authentic 16-tile Filipino mahjong.
    mahjong-logic.js — pure game rules: tiles, deck, win/meld detection,
    claim eligibility, and scoring. No DOM, no storage, no room state.
    ===================================================================== */
-
-/* ---------------- core tile / deck logic ---------------- */
 const SUITS = ['C','B','D'];
 const WINDS = ['WE','WS','WW','WN'];
 const DRAGONS = ['DR','DG','DW'];
+const FLOWERS = ['F1','F2','F3','F4','F5','F6','F7','F8'];
 const WIND_NAME = {WE:'East',WS:'South',WW:'West',WN:'North'};
 const DRAGON_NAME = {DR:'Red Dragon',DG:'Green Dragon',DW:'White Dragon'};
 const SUIT_NAME = {C:'Character',B:'Sticks',D:'Balls'};
+const FLOWER_NAME = {F1:'Plum',F2:'Orchid',F3:'Chrysanthemum',F4:'Bamboo',F5:'Spring',F6:'Summer',F7:'Autumn',F8:'Winter'};
 
 const GLYPH = {
   C1:'\u{1F007}',C2:'\u{1F008}',C3:'\u{1F009}',C4:'\u{1F00A}',C5:'\u{1F00B}',
@@ -21,7 +21,7 @@ const GLYPH = {
   D6:'\u{1F01E}',D7:'\u{1F01F}',D8:'\u{1F020}',D9:'\u{1F021}',
   WE:'\u{1F000}',WS:'\u{1F001}',WW:'\u{1F002}',WN:'\u{1F003}',
   DR:'\u{1F004}',DG:'\u{1F005}',DW:'\u{1F006}',
-  JK:'\u{1F0CF}'
+  F1:'🌸',F2:'🌷',F3:'🌼',F4:'🎍',F5:'🌱',F6:'☀️',F7:'🍁',F8:'❄️',
 };
 
 function buildDeck(){
@@ -29,37 +29,37 @@ function buildDeck(){
   for(const s of SUITS) for(let r=1;r<=9;r++) for(let c=0;c<4;c++) deck.push(s+r);
   for(const w of WINDS) for(let c=0;c<4;c++) deck.push(w);
   for(const d of DRAGONS) for(let c=0;c<4;c++) deck.push(d);
-  for(let c=0;c<8;c++) deck.push('JK');
-  return deck;
+  for(const f of FLOWERS) deck.push(f);
+  return deck; // 108 + 16 + 12 + 8 = 144
 }
 function shuffle(arr){
   const a=arr.slice();
   for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
   return a;
 }
-function isJoker(t){return t==='JK';}
-function isHonor(t){return WINDS.includes(t)||DRAGONS.includes(t);}
-function isSuited(t){return !isJoker(t)&&!isHonor(t);}
-function suitOf(t){return isSuited(t)?t[0]:null;}
-function rankOf(t){return isSuited(t)?parseInt(t.slice(1),10):null;}
-function countTiles(tiles){const m={};for(const t of tiles)m[t]=(m[t]||0)+1;return m;}
+function isFlowerCategory(t){ return WINDS.includes(t)||DRAGONS.includes(t)||FLOWERS.includes(t); }
+function isSuited(t){ return !isFlowerCategory(t); }
+function suitOf(t){ return isSuited(t)?t[0]:null; }
+function rankOf(t){ return isSuited(t)?parseInt(t.slice(1),10):null; }
+function countTiles(tiles){ const m={}; for(const t of tiles) m[t]=(m[t]||0)+1; return m; }
+
 function tileLabel(t){
-  if(isJoker(t)) return 'Joker';
   if(WINDS.includes(t)) return WIND_NAME[t]+' Wind';
   if(DRAGONS.includes(t)) return DRAGON_NAME[t];
+  if(FLOWERS.includes(t)) return FLOWER_NAME[t];
   return SUIT_NAME[suitOf(t)]+' '+rankOf(t);
 }
-function tileBlurb(t){
-  if(isJoker(t)) return 'Wild — stands in for any tile in a pung, kong, or chow (never in the pair).';
-  if(WINDS.includes(t)) return 'Flower tile (honor) — works in pungs and kongs, not in runs (chows).';
-  if(DRAGONS.includes(t)) return 'Flower tile (honor) — works in pungs and kongs, not in runs (chows).';
+function tileBlurb(t, jokerTile){
+  if(t===jokerTile) return "This hand's Joker — wild, stands in for any tile in a pung, kong, or chow (never the pair).";
+  if(WINDS.includes(t)||DRAGONS.includes(t)) return 'Flower tile (honor) — collected for bonus chips, never used in melds.';
+  if(FLOWERS.includes(t)) return 'Flower tile — collected for bonus chips, never used in melds.';
   return SUIT_NAME[suitOf(t)]+' suit, number '+rankOf(t)+' — can form runs (chows) with neighboring numbers in the same suit.';
 }
 function sortHand(tiles){
   const order=t=>{
-    if(isJoker(t))return [9,0];
     if(WINDS.includes(t))return [7,WINDS.indexOf(t)];
     if(DRAGONS.includes(t))return [8,DRAGONS.indexOf(t)];
+    if(FLOWERS.includes(t))return [9,FLOWERS.indexOf(t)];
     return [SUITS.indexOf(suitOf(t)),rankOf(t)];
   };
   return tiles.slice().sort((a,b)=>{
@@ -117,15 +117,19 @@ function canExtractPungsOnly(counts,jokers,meldsNeeded){
   }
   return false;
 }
-function isWinningShape(concealedTiles,exposedMeldCount){
-  const meldsNeeded=4-exposedMeldCount;
+function isWinningShape(concealedTiles,exposedMeldCount,jokerTile){
+  const meldsNeeded=5-exposedMeldCount;
   const tiles=concealedTiles.slice();
-  const jokerCount=tiles.filter(isJoker).length;
-  const nonJokers=tiles.filter(t=>!isJoker(t));
-  const counts=countTiles(nonJokers);
-  if(exposedMeldCount===0 && jokerCount===0 && tiles.length===14){
-    const c=countTiles(tiles); const vals=Object.values(c);
-    if(vals.length===7 && vals.every(v=>v===2)) return {ok:true,special:'sevenPairs'};
+  const isWild = t=>t===jokerTile;
+  const jokerCount=tiles.filter(isWild).length;
+  const nonWild=tiles.filter(t=>!isWild(t));
+  const counts=countTiles(nonWild);
+  if(exposedMeldCount===0 && jokerCount===0 && tiles.length===17){
+    const c=countTiles(tiles);
+    const entries=Object.entries(c);
+    const pairs=entries.filter(([,v])=>v===2);
+    const triples=entries.filter(([,v])=>v===3);
+    if(pairs.length===7 && triples.length===1) return {ok:true,special:'sevenPairsTriple'};
   }
   const candidates=Object.keys(counts).filter(k=>counts[k]>=2);
   for(const p of candidates){
@@ -135,12 +139,13 @@ function isWinningShape(concealedTiles,exposedMeldCount){
   }
   return {ok:false};
 }
-function isAllPungsHand(concealedTiles,exposedMelds){
+function isAllPungsHand(concealedTiles,exposedMelds,jokerTile){
   if(exposedMelds.some(m=>m.type==='chow')) return false;
-  const meldsNeeded=4-exposedMelds.length;
+  const meldsNeeded=5-exposedMelds.length;
   const tiles=concealedTiles.slice();
-  const jokerCount=tiles.filter(isJoker).length;
-  const counts=countTiles(tiles.filter(t=>!isJoker(t)));
+  const isWild = t=>t===jokerTile;
+  const jokerCount=tiles.filter(isWild).length;
+  const counts=countTiles(tiles.filter(t=>!isWild(t)));
   const candidates=Object.keys(counts).filter(k=>counts[k]>=2);
   for(const p of candidates){
     counts[p]-=2;
@@ -150,79 +155,43 @@ function isAllPungsHand(concealedTiles,exposedMelds){
   }
   return false;
 }
-function isAllOneSuitHand(concealedTiles,exposedMelds){
+function isAllOneSuitHand(concealedTiles,exposedMelds,jokerTile){
   const all=concealedTiles.concat(...exposedMelds.map(m=>m.tiles));
-  const real=all.filter(t=>!isJoker(t));
-  if(real.some(isHonor)) return false;
+  const real=all.filter(t=>t!==jokerTile);
+  if(real.some(t=>!isSuited(t))) return false;
   const suits=new Set(real.map(suitOf));
   return suits.size===1;
 }
-/* ---------------- claim eligibility ---------------- */
-function jokerCountIn(tiles){ return tiles.filter(isJoker).length; }
 
-function eligiblePong(hand, tile){
-  const nonJ = hand.filter(t=>t===tile).length;
-  const jk = jokerCountIn(hand);
-  const need = 2 - nonJ;
+function wildCountIn(tiles, jokerTile){ return tiles.filter(t=>t===jokerTile).length; }
+function eligiblePong(hand, tile, jokerTile){
+  if(tile===jokerTile) return false;
+  const nonJ=hand.filter(t=>t===tile).length;
+  const jk=wildCountIn(hand,jokerTile);
+  const need=2-nonJ;
   return need>=0 && need<=jk;
 }
-function eligibleKong(hand, tile){
-  const nonJ = hand.filter(t=>t===tile).length;
-  const jk = jokerCountIn(hand);
-  const need = 3 - nonJ;
+function eligibleKong(hand, tile, jokerTile){
+  if(tile===jokerTile) return false;
+  const nonJ=hand.filter(t=>t===tile).length;
+  const jk=wildCountIn(hand,jokerTile);
+  const need=3-nonJ;
   return need>=0 && need<=jk;
 }
-function eligibleChowRuns(hand, tile){
-  // returns array of the up-to-3 possible run shapes (as the two OTHER tiles needed),
-  // each entry: {need:[tileId,tileId]} where a tileId might be satisfied by a joker
+function eligibleChowRuns(hand, tile, jokerTile){
   if(!isSuited(tile)) return [];
   const s=suitOf(tile), r=rankOf(tile);
   const shapes=[];
-  if(r>=3) shapes.push([s+(r-2), s+(r-1)]);          // tile is the highest of the run
-  if(r>=2 && r<=8) shapes.push([s+(r-1), s+(r+1)]);   // tile is the middle
-  if(r<=7) shapes.push([s+(r+1), s+(r+2)]);           // tile is the lowest
-  const jk = jokerCountIn(hand);
-  const counts = countTiles(hand);
+  if(r>=3) shapes.push([s+(r-2), s+(r-1)]);
+  if(r>=2 && r<=8) shapes.push([s+(r-1), s+(r+1)]);
+  if(r<=7) shapes.push([s+(r+1), s+(r+2)]);
+  const jk=wildCountIn(hand,jokerTile);
+  const counts=countTiles(hand);
   const usable=[];
   for(const pair of shapes){
     let need=0;
-    for(const need_t of pair){ if((counts[need_t]||0)<1) need++; }
+    for(const needT of pair){ if((counts[needT]||0)<1) need++; }
     if(need<=jk) usable.push(pair);
   }
   return usable;
-}
-function computeEligibleClaims(room, discardSeat, tile){
-  const out = {}; // seat -> array of claim types available
-  for(let seat=0; seat<4; seat++){
-    if(seat===discardSeat) continue;
-    if(!room.seats[seat]) continue;
-    const hand = room.hands[seat];
-    const types = [];
-    const winCheck = isWinningShape(hand.concat([tile]), room.melds[seat].length);
-    if(winCheck.ok) types.push('win');
-    if(eligibleKong(hand, tile)) types.push('kong');
-    if(eligiblePong(hand, tile)) types.push('pong');
-    if(seat === (discardSeat+1)%4 && eligibleChowRuns(hand, tile).length>0) types.push('chow');
-    if(types.length) out[seat]=types;
-  }
-  return out;
-}
-
-/* ---------------- scoring ---------------- */
-// Returns {base, doubles, labels:[...], totalEach:{}} style breakdown for a finished hand.
-function scoreHand(room, winnerSeat, winTile, wonBy /* 'self'|'discard' */, discarderSeat){
-  const hand = room.hands[winnerSeat];
-  const melds = room.melds[winnerSeat];
-  const allTiles = hand.concat(winTile?[winTile]:[]);
-  const shape = isWinningShape(allTiles, melds.length);
-  let doubles = 0;
-  const labels = [];
-  if(shape.special==='sevenPairs'){ doubles += 2; labels.push('Seven Pairs'); }
-  if(isAllPungsHand(allTiles, melds)){ doubles += 1; labels.push('All Pungs/Kongs'); }
-  if(isAllOneSuitHand(allTiles, melds)){ doubles += 1; labels.push('One Suit Flush'); }
-  if(melds.some(m=>m.type==='kong')){ doubles += melds.filter(m=>m.type==='kong').length; labels.push('Kong Bonus'); }
-  if(wonBy==='self'){ doubles += 1; labels.push('Self-Drawn'); }
-  const base = 1;
-  const bigChips = base * Math.pow(2, doubles);
-  return { base, doubles, labels, bigChips };
 }

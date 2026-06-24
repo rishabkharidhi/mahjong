@@ -1,5 +1,5 @@
 /* ================= ACTIONS / EVENT HANDLING ================= */
-https://github.com/rishabkharidhi/snows-mahjong-corner/tree/main/site
+
 function showToast(msg){
   const old = document.getElementById('toast');
   if(old) old.remove();
@@ -52,7 +52,7 @@ async function handleJoinRoom(){
 async function handleLeaveRoom(){
   stopPolling();
   STATE.roomCode = null; STATE.room = null; STATE.screen = 'home';
-  STATE.selectedDiscardIdx = null; STATE.selectedPassIdx = [];
+  STATE.selectedDiscardIdx = null;
   PROFILE.lastRoomCode = null;
   await saveProfile();
   renderApp();
@@ -61,7 +61,8 @@ async function handleLeaveRoom(){
 function updateTileInfoBar(tileId){
   const bar = document.getElementById('tile-info-bar');
   if(!bar || !tileId) return;
-  bar.innerHTML = `<span class="ti-name">${tileLabel(tileId)}</span><span class="ti-blurb">${tileBlurb(tileId)}</span>`;
+  const jokerTile = STATE.room ? STATE.room.jokerTile : null;
+  bar.innerHTML = `<span class="ti-name">${tileLabel(tileId)}</span><span class="ti-blurb">${tileBlurb(tileId, jokerTile)}</span>`;
 }
 
 async function handleAppClick(e){
@@ -80,7 +81,6 @@ async function handleAppClick(e){
     case 'createRoom': await handleCreateRoom(); break;
     case 'joinRoom': await handleJoinRoom(); break;
     case 'toggleHowTo': STATE.showHowTo = !STATE.showHowTo; renderApp(); break;
-    case 'closeHowToBg': STATE.showHowTo = false; renderApp(); break;
 
     case 'joinSeat': await doAction(d=>actionJoinSeat(d, seat, PROFILE)); break;
     case 'addBot': await doAction(d=>actionAddBot(d, seat, PROFILE.id)); break;
@@ -96,24 +96,6 @@ async function handleAppClick(e){
     }
     case 'leaveRoom': await handleLeaveRoom(); break;
 
-    case 'togglePassIdx': {
-      STATE.selectedPassIdx = STATE.selectedPassIdx || [];
-      const pos = STATE.selectedPassIdx.indexOf(idx);
-      if(pos>=0) STATE.selectedPassIdx.splice(pos,1);
-      else if(STATE.selectedPassIdx.length<3) STATE.selectedPassIdx.push(idx);
-      renderApp();
-      break;
-    }
-    case 'confirmPass': {
-      const mySeat = mySeatIndex(STATE.room);
-      const hand = sortHand(STATE.room.hands[mySeat]||[]);
-      const tiles = (STATE.selectedPassIdx||[]).map(i=>hand[i]);
-      if(tiles.length!==3) break;
-      STATE.selectedPassIdx = [];
-      await doAction(d=>actionSubmitPass(d, mySeat, tiles));
-      break;
-    }
-
     case 'selectDiscard': STATE.selectedDiscardIdx = (STATE.selectedDiscardIdx===idx ? null : idx); renderApp(); break;
     case 'drawTile': { const mySeat=mySeatIndex(STATE.room); await doAction(d=>actionDraw(d, mySeat)); break; }
     case 'confirmDiscard': {
@@ -126,7 +108,6 @@ async function handleAppClick(e){
       break;
     }
     case 'declareWin': { const mySeat=mySeatIndex(STATE.room); await doAction(d=>actionDeclareSelfWin(d, mySeat)); break; }
-    case 'declarePopEye': { const mySeat=mySeatIndex(STATE.room); await doAction(d=>actionDeclarePopEye(d, mySeat)); break; }
     case 'declareKong': { const mySeat=mySeatIndex(STATE.room); await doAction(d=>actionDeclareKongFromHand(d, mySeat, tile)); break; }
     case 'claim': { const mySeat=mySeatIndex(STATE.room); await doAction(d=>actionClaim(d, mySeat, type)); break; }
 
@@ -141,41 +122,29 @@ let countdownHandle = null;
 
 async function maybeDriveBots(room){
   if(!room) return null;
-  if(room.phase==='pass'){
-    for(let s=0;s<4;s++){
-      if(room.seats[s] && room.seats[s].isBot && (!room.passPhase || !room.passPhase.submitted[s])){
+  if(room.phase!=='play') return null;
+  const seat = room.turnSeat;
+  if(room.turnPhase==='draw' && room.seats[seat] && room.seats[seat].isBot){
+    return await updateRoom(room.code, draft=>actionDraw(draft, seat));
+  }
+  if(room.turnPhase==='discard' && room.seats[seat] && room.seats[seat].isBot){
+    return await updateRoom(room.code, draft=>{
+      if(draft.turnSeat!==seat || draft.turnPhase!=='discard') return false;
+      const check = isWinningShape(draft.hands[seat], draft.melds[seat].length, draft.jokerTile);
+      if(check.ok) return actionDeclareSelfWin(draft, seat);
+      const t = botChooseDiscard(draft.hands[seat], draft.jokerTile);
+      return actionDiscard(draft, seat, t);
+    });
+  }
+  if(room.turnPhase==='claim' && room.pendingDiscard){
+    for(const sStr of Object.keys(room.pendingDiscard.eligible)){
+      const s = Number(sStr);
+      if(room.seats[s] && room.seats[s].isBot && room.pendingDiscard.responses[s]===undefined){
         return await updateRoom(room.code, draft=>{
-          if(draft.phase!=='pass' || !draft.passPhase || draft.passPhase.submitted[s]) return false;
-          const tiles = botChoosePassTiles(draft.hands[s]);
-          return actionSubmitPass(draft, s, tiles);
+          if(!draft.pendingDiscard || draft.pendingDiscard.responses[s]!==undefined) return false;
+          const types = draft.pendingDiscard.eligible[s] || [];
+          return actionClaim(draft, s, botClaimDecision(types));
         });
-      }
-    }
-  } else if(room.phase==='play'){
-    const seat = room.turnSeat;
-    if(room.turnPhase==='draw' && room.seats[seat] && room.seats[seat].isBot){
-      return await updateRoom(room.code, draft=>actionDraw(draft, seat));
-    }
-    if(room.turnPhase==='discard' && room.seats[seat] && room.seats[seat].isBot){
-      return await updateRoom(room.code, draft=>{
-        if(draft.turnSeat!==seat || draft.turnPhase!=='discard') return false;
-        const check = isWinningShape(draft.hands[seat], draft.melds[seat].length);
-        if(check.ok) return actionDeclareSelfWin(draft, seat);
-        if(jokerCountIn(draft.hands[seat])>=4) return actionDeclarePopEye(draft, seat);
-        const t = botChooseDiscard(draft.hands[seat]);
-        return actionDiscard(draft, seat, t);
-      });
-    }
-    if(room.turnPhase==='claim' && room.pendingDiscard){
-      for(const sStr of Object.keys(room.pendingDiscard.eligible)){
-        const s = Number(sStr);
-        if(room.seats[s] && room.seats[s].isBot && room.pendingDiscard.responses[s]===undefined){
-          return await updateRoom(room.code, draft=>{
-            if(!draft.pendingDiscard || draft.pendingDiscard.responses[s]!==undefined) return false;
-            const types = draft.pendingDiscard.eligible[s] || [];
-            return actionClaim(draft, s, botClaimDecision(types));
-          });
-        }
       }
     }
   }
