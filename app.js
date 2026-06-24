@@ -1,5 +1,5 @@
 /* ================= ACTIONS / EVENT HANDLING ================= */
-
+https://github.com/rishabkharidhi/snows-mahjong-corner/tree/main/site
 function showToast(msg){
   const old = document.getElementById('toast');
   if(old) old.remove();
