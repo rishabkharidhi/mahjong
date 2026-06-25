@@ -262,8 +262,9 @@ function setupHandDrag(){
       }
       STATE.dragEndedAt = Date.now();
     }
+    const wasMoved = ds.moved;
     startRects = null;
-    renderApp();
+    if(wasMoved) renderApp();
   });
 }
 

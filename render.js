@@ -169,7 +169,7 @@ function renderLanterns(){
 function renderHome(){
   return `
   ${renderLanterns()}
-  <div class="screen">
+  <div class="screen narrow-col">
     <div class="center" style="margin-bottom:8px;">
       <h1 class="brand">🀄 Snows Mahjong Corner</h1>
       <p class="subtitle">Authentic 16-tile Filipino mahjong, played online with your barkada.</p>
@@ -223,7 +223,7 @@ function renderLobby(room){
 
   const filled = room.seats.every(s=>s);
   return `
-  <div class="screen">
+  <div class="screen narrow-col">
     <div class="title-row">
       <h1 class="brand" style="font-size:1.5rem;margin:0;">🏮 Room ${room.code}</h1>
       <button class="icon-btn" data-action="copyCode" title="Copy room code" type="button">📋</button>
@@ -263,15 +263,19 @@ function renderOpponentsRow(room, mySeat){
 function renderFelt(room){
   const wallLeft = Math.max(0, room.backPos - room.deckPos + 1);
   const discards = room.discardPile.slice(-16);
-  const lastIdx = discards.length-1;
-  const discardHtml = discards.map((d,i)=>{
-    const ring = i===lastIdx ? 'last-discard-ring' : '';
-    return `<span class="${ring}">${tileNode(d.tile,{})}</span>`;
-  }).join('');
+  const last = discards[discards.length-1];
+  const history = discards.slice(0, -1);
+  const historyHtml = history.map(d=>tileNode(d.tile,{})).join('');
+  const lastHtml = last ? `
+    <div class="last-discard-zone">
+      <div class="last-discard-label">${seatName(room,last.seat)} discarded</div>
+      <div class="last-discard-tile">${tileNode(last.tile,{big:true})}</div>
+    </div>` : `<p class="muted center">The table is set. First discard coming up…</p>`;
   return `<div class="felt">
     <div class="wall-info">🀫 Wall: ${wallLeft}</div>
     <div class="dealer-info">🀄 ${seatName(room,room.dealerSeat)}</div>
-    ${discards.length? `<div class="discard-grid">${discardHtml}</div>` : `<p class="muted center">The table is set. First discard coming up…</p>`}
+    ${lastHtml}
+    ${history.length? `<div class="discard-history"><span class="dh-label">Earlier:</span>${historyHtml}</div>` : ''}
   </div>`;
 }
 
@@ -389,13 +393,16 @@ function renderMatchEndModal(room){
   </div></div>`;
 }
 
-function renderLogPanel(room){
+function renderLogList(room){
   const entries = room.log.slice().reverse();
+  return entries.length ? `<ul class="log-list">${entries.map(l=>`<li>${escapeHtml(l)}</li>`).join('')}</ul>` : `<p class="muted">Nothing's happened yet.</p>`;
+}
+function renderLogPanel(room){
   return `<div class="modal-bg"><div class="modal">
     <button class="close-x" data-action="toggleLog" type="button">×</button>
     <h2>📜 Table activity</h2>
     <div class="howto-body">
-      ${entries.length ? `<ul class="log-list">${entries.map(l=>`<li>${escapeHtml(l)}</li>`).join('')}</ul>` : `<p class="muted">Nothing's happened yet.</p>`}
+      ${renderLogList(room)}
     </div>
   </div></div>`;
 }
@@ -430,24 +437,34 @@ function renderGame(room){
   if(STATE.showLog) overlay += renderLogPanel(room);
 
   return `
-  <div class="screen" style="padding-bottom:0;">
-    <div class="title-row">
-      <span class="pill">🏮 ${room.code}</span>
-      <span class="muted">Hand ${room.handNumber}</span>
-      ${mySeat>=0?`<span class="pill ${moneyClass(room.chips[mySeat])}" style="background:rgba(0,0,0,0.28);">${fmtMoney(room.chips[mySeat])}</span>`:''}
-      <button class="icon-btn" data-action="toggleLog" title="Activity log" type="button">📜</button>
-      <button class="icon-btn" data-action="toggleHowTo" title="How to play" type="button">❓</button>
+  <div class="game-layout">
+    <div class="main-col">
+      <div class="screen" style="padding-bottom:0;">
+        <div class="title-row">
+          <span class="pill">🏮 ${room.code}</span>
+          <span class="muted">Hand ${room.handNumber}</span>
+          ${mySeat>=0?`<span class="pill ${moneyClass(room.chips[mySeat])}" style="background:rgba(0,0,0,0.28);">${fmtMoney(room.chips[mySeat])}</span>`:''}
+          <button class="icon-btn log-toggle-btn" data-action="toggleLog" title="Activity log" type="button">📜</button>
+          <button class="icon-btn" data-action="toggleHowTo" title="How to play" type="button">❓</button>
+        </div>
+        ${renderChipToasts()}
+        ${renderOpponentsRow(room, mySeat)}
+        <div class="table-wrap">
+          ${renderFelt(room)}
+        </div>
+        <div class="tile-info-bar" id="tile-info-bar">
+          <span class="ti-name">Tap or hover any tile</span>
+          <span class="ti-blurb">to see what it is — great for first-timers.</span>
+        </div>
+      </div>
+      ${dock}
     </div>
-    ${renderChipToasts()}
-    ${renderOpponentsRow(room, mySeat)}
-    <div class="table-wrap">
-      ${renderFelt(room)}
-    </div>
-    <div class="tile-info-bar" id="tile-info-bar">
-      <span class="ti-name">Tap or hover any tile</span>
-      <span class="ti-blurb">to see what it is — great for first-timers.</span>
+    <div class="side-col">
+      <div class="side-log-card">
+        <h3>📜 Table activity</h3>
+        ${renderLogList(room)}
+      </div>
     </div>
   </div>
-  ${dock}
   ${overlay}`;
 }
